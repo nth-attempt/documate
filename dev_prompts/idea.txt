@@ -1,0 +1,85 @@
+I want to build a project called Documate. At a high level, 
+
+* It automatically generates architecture diagrams, documentation, and links to source code to help you understand unfamiliar codebases quickly. You can also ask complex questions about the codebase to get context-grounded specific answers
+* Documate provides up-to-date documentation you can talk to, for any repo. Like Deep Research but for code repositories
+* Provides architecture diagrams, documentation, links to sources, summaries and more for all your repos. 
+* Ask Documate - will use information in the wiki provided by documate to better understand and find the relevant context in your codebase.
+
+### Detailed Functional Requirements for Documate - A DeepWiki-like System
+
+**1. Repository Ingestion and Management:**
+*   **Repository Source Support:** The system must be able to accept and process code repositories from Bitbucket and Github.
+*   **Input Mechanism:** Users must be able to submit public GitHub and Bitbucket repository URLs for indexing and processing.
+*   **Private Repository Access:** The system must securely access private repositories using personal access tokens.
+*   **Local File & ZIP Upload:** The system should support uploading local files and compressed ZIP archives for analysis.
+*   **Repository Lifecycle Management:** Users should have functionalities to add, delete, modify, and query indexed repositories.
+*   **Directory-Level Management:** The system must support custom directory generation and dynamic documentation creation at the directory level within repositories.
+*   **Repository Directory Modification:** Users should be able to modify the directories of processed repositories.
+*   **Local Cloning:** The system must clone code repositories locally for detailed analysis.
+*   **Incremental Updates:** The system should support incremental updates of processed repositories at configurable intervals.
+
+**2. Code Analysis and Understanding:**
+*   **Automated Code Structure Analysis:** The system must automatically analyze the code structure and understand relationships between code components.
+*   **Core Concept Identification:** The system should identify and understand the core concepts within a given codebase.
+*   **README.md Analysis:** The system must analyze the repository's `README.md` file, if available, as part of its initial processing.
+*   **File Reading and Analysis:** The system must read and analyze individual code files as needed during the documentation generation process.
+*   **Code Dependency Analysis:** The system should be able to perform code dependency analysis, with an option to enable or disable this feature.
+*   **Intelligent Filtering:** The system should include intelligent filtering to help the AI accurately obtain repository file directories.
+*   **Code Embeddings Creation:** The system must create embeddings of the code for efficient retrieval and intelligent Q&A.
+
+**3. Documentation and Knowledge Base Generation:**
+*   **Comprehensive Documentation Generation:** The system must automatically generate comprehensive and context-aware documentation for the codebases.
+*   **Multi-language Code Support:** The system must support code analysis and documentation generation for **all programming languages**, including Python, Java, and JavaScript.
+*   **Automated README.md Creation:** The system should be capable of automatically creating `README.md` files for code repositories.
+*   **SEO-Friendly Output:** The generated documents and knowledge bases should be SEO-friendly to facilitate search engine indexing.
+*   **Organized Wiki Output:** The system must organize all generated content into an easy-to-navigate, structured wiki format.
+*   **Final Knowledge Base Document Generation:** The system should generate a cohesive final knowledge base document.
+*   **Visual Diagrams:** The system must automatically generate Mermaid diagrams to visualize architecture, code structure, and data flow within the codebase.
+*   **Source Code Linking:** The generated documentation should include direct links to the relevant source code.
+
+**4. AI Interaction and Querying (Ask & DeepResearch Features):**
+*   **Ask Feature:** The system must enable dialogic interaction with AI, allowing users to ask complex questions about the codebase and receive context-grounded, specific, and accurate answers.
+*   **RAG-Powered AI:** The Ask feature should be powered by Retrieval Augmented Generation (RAG) to ensure accuracy based on the actual code snippets in the repository.
+*   **Real-time Response Streaming:** AI responses should be generated and streamed in real-time for an interactive user experience.
+*   **Conversation History:** The system must maintain conversation context to enable coherent multi-turn interactions.
+*   **DeepResearch Feature:** The system should offer an advanced "DeepResearch" capability for in-depth investigation of complex topics through a multi-turn research process.
+*   **Structured Research Process:** DeepResearch must follow a clear research plan, provide interim updates, and deliver a comprehensive final conclusion.
+*   **Automatic Research Continuation:** The AI should automatically continue the research process through multiple iterations (e.g., up to 5) until a conclusion is reached.
+*   **MCPServer Functionality:** The system should be capable of acting as an MCPServer for a single repository, allowing other AI models to call upon it for analysis and understanding.
+
+**5. Model and Provider Management:**
+*   **Multiple AI Provider Support:** The system must support integration with various AI model providers, including Google Gemini, OpenAI, OpenRouter, local Ollama models, AzureOpenAI, and Anthropic.
+*   **Configurable Models:** Users must be able to configure specific chat and analysis models to be used.
+*   **Custom Model & API Support:** The system should support the integration of custom AI models and custom APIs to allow for expansion.
+*   **Flexible Model Selection System:** A provider-based model selection system should allow for defining available models, default models, and model-specific parameters like temperature and top_p.
+*   **OpenAI-Compatible Embeddings:** The system must support the use of embedding models compatible with the OpenAI API (e.g., Alibaba Qwen) through configuration.
+*   **Enterprise Private Channel Support:** The system should support connecting to private or enterprise-specific API endpoints using base URL configuration.
+*   **API Key Handling (Future):** The system should be designed to support a future mode where users provide their own API keys directly in requests for enterprise deployments.
+
+**6. Configuration and Customisation:**
+*   **Environment Variable Configuration:** Key system settings must be configurable via environment variables, including repository paths, API keys, language settings, database types, model providers, database connection strings, update intervals, file upload limits, deep research model selection, and flags for incremental updates, code dependency analysis, MCP prompt generation, and warehouse description generation.
+*   **JSON Configuration Files:** The system should utilize JSON configuration files (e.g., `generator.json`, `embedder.json`, `repo.json`) to manage model settings, embedding configurations, and repository handling rules (like file filters and size limits).
+*   **Custom Configuration Location:** The location of configuration files should be customizable via environment variables.
+*   **Custom Model Offerings:** Service providers should be able to offer multiple AI model choices to users within their organization, supporting specialized or fine-tuned models.
+*   **Multi-language Interface & Output:** The system must support multiple display and generated documentation languages, such as Chinese, English, French, Japanese, Spanish, Korean, Vietnamese, and Brazilian Portuguese.
+
+**7. User and System Management:**
+*   **User Management:** The system should provide functions for adding, deleting, modifying, and querying users.
+*   **User Permission Management:** The system must offer functions for adding, deleting, modifying, and querying user permissions.
+*   **Authorization Mode:** The system should include an optional authorization mode requiring a secret code for wiki generation, restricting frontend initiation and cache deletion.
+*   **Data Persistence:** The system must ensure that cloned repositories, their embeddings and indexes, and cached generated wiki content persist across system restarts or container shutdowns.
+*   **Logging:** The system must implement robust logging capabilities with configurable verbosity levels (e.g., DEBUG, INFO, WARNING, ERROR, CRITICAL) and configurable log file destinations.
+*   **Fine-tuning Platform:** The system should provide a platform for data fine-tuning to generate datasets, and support generating different fine-tuning framework datasets at the repository level.
+
+
+
+==================================================
+
+
+
+
+Can we build this app in python step by step? can you tell me your plan on what you were building so I can authorize it before you generate the code for it?
+
+Can we use opensearch? can we use langgraph for building agents that do the doc generation, diagram generation etc. give me ideas before we go to code generation
+
+Once we have the broader plan, we can deep dive into items and generate code for those pieces one at a time
