@@ -1,0 +1,25 @@
+[project]
+name = "documate"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.12",
+    "gitpython>=3.1.44",
+    "langchain>=0.3.25",
+    "langgraph>=0.4.8",
+    "openai>=1.86.0",
+    "tiktoken>=0.9.0",
+    "uvicorn>=0.34.3",
+    "langchain-openai>=0.3.22",
+    "langchain-core>=0.3.65",
+    "opensearch-py>=2.8.0",
+    "pydantic>=2.11.5",
+    "pydantic-settings>=2.9.1",
+    "python-dotenv>=1.1.0",
+    "streamlit>=1.45.1",
+    "chromadb>=0.6.3",
+    "langchain-google-genai>=2.1.5",
+    "langchain-community>=0.3.25",
+]
