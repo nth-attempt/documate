@@ -93,15 +93,34 @@ def render_add_new_repo_view():
         st.success("Repository processed and CodeWiki generated successfully!")
 
     with tab1:
-        repo_url = st.text_input("Repository URL", placeholder="https://github.com/your-org/your-repo.git")
+        repo_url = st.text_input("Repository URL", placeholder="https://your-bitbucket-server/scm/proj/repo.git")
+        
+        st.info("For private repositories, provide the necessary credentials below.")
+        
+        username = st.text_input("Username (Optional)", help="Your Git username, e.g., 'jsmith'")
+        password = st.text_input(
+            "Password or Access Token (Optional)", 
+            type="password", 
+            help="Your password, a Personal Access Token (PAT), or a Bitbucket App Password."
+        )
+
         if st.button("Analyze & Generate CodeWiki from URL", use_container_width=True):
-            if repo_url:
+            if not repo_url:
+                st.warning("Please provide a repository URL.")
+            else:
                 with st.spinner(f"Cloning {repo_url}..."):
-                    local_path = manager.clone_repo(repo_url)
+                    # Call the updated RepoManager method with all the credentials
+                    local_path = manager.clone_repo(
+                        repo_url=repo_url,
+                        username=username if username else None,
+                        password=password if password else None
+                    )
+                
                 if local_path:
+                    # The handle_ingestion_and_generation function will take it from here
                     handle_ingestion_and_generation(local_path)
                 else:
-                    st.error("Failed to clone. Check URL and see terminal logs.")
+                    st.error("Failed to clone. Please check the URL and your credentials.")
     
     with tab2:
         uploaded_file = st.file_uploader("Choose a ZIP file", type="zip")

@@ -19,24 +19,58 @@ class RepoManager:
         repo_name = parsed_path.lstrip('/').replace('.git', '')
         return repo_name.replace('/', '_')
 
-    def clone_repo(self, repo_url: str, pat: str | None = None) -> str | None:
+    def clone_repo(
+        self, 
+        repo_url: str, 
+        username: str | None = None, 
+        password: str | None = None, # Can be a password or a token
+        pat: str | None = None # Kept for backward compatibility / single-token auth
+    ) -> str | None:
+        """
+        Clones a repository, handling public, private (user/pass/token), and PAT-based auth.
+        """
         repo_name = self._get_repo_name_from_url(repo_url)
         clone_destination = os.path.join(self.base_clone_path, repo_name)
+
         if os.path.exists(clone_destination):
-            print(f"Found existing directory. Removing '{clone_destination}' for a fresh start.")
+            print(f"Found existing directory. Removing '{clone_destination}' for a fresh clone.")
             shutil.rmtree(clone_destination)
+
         print(f"Cloning '{repo_url}' into '{clone_destination}'...")
+
         try:
-            if pat:
+            # Priority 1: Username and Password/Token Authentication
+            if username and password:
+                print("Attempting clone with username and password/token.")
+                parsed_url = urlparse(repo_url)
+                # We need to quote the username and password to handle special characters
+                from urllib.parse import quote
+                encoded_user = quote(username)
+                encoded_pass = quote(password)
+                auth_url = f"{parsed_url.scheme}://{encoded_user}:{encoded_pass}@{parsed_url.netloc}{parsed_url.path}"
+                Repo.clone_from(auth_url, clone_destination)
+
+            # Priority 2: Single Personal Access Token (PAT) Authentication (e.g., for GitHub)
+            elif pat:
+                print("Attempting clone with a single Personal Access Token.")
                 parsed_url = urlparse(repo_url)
                 auth_url = f"{parsed_url.scheme}://x-token-auth:{pat}@{parsed_url.netloc}{parsed_url.path}"
                 Repo.clone_from(auth_url, clone_destination)
+
+            # Priority 3: Public repository
             else:
+                print("Attempting clone as a public repository.")
                 Repo.clone_from(repo_url, clone_destination)
+
             print(f"✅ Successfully cloned repository to: {clone_destination}")
             return clone_destination
+
         except GitCommandError as e:
             print(f"❌ Error cloning repository: {e}")
+            print("Please check the following:")
+            print("1. The repository URL is correct.")
+            print("2. The repository is not private, OR you have provided valid credentials.")
+            print("3. Your credentials (username/password/token) have the correct permissions.")
             return None
 
     def process_zip_file(self, file_content: BytesIO, original_filename: str) -> str | None:
