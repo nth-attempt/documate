@@ -1,5 +1,8 @@
+# src/documate/embeddings_factory.py
+
 import os
 from typing import Any
+from .azure_auth import AzureADTokenManager
 
 def get_embedding_model() -> Any:
     """
@@ -16,12 +19,19 @@ def get_embedding_model() -> Any:
         return GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=google_api_key)
 
     elif provider == "azure":
-        # Placeholder for your future Azure setup.
-        raise NotImplementedError("Azure provider is configured but not yet fully implemented.")
+        # --- NEW SECTION FOR AZURE ---
+        from langchain_openai import AzureOpenAIEmbeddings
 
-    elif provider == "openai":
-        # Placeholder for standard OpenAI
-        raise NotImplementedError("OpenAI provider is configured but not yet fully implemented.")
+        # Create a single token manager instance
+        token_manager = AzureADTokenManager()
+
+        return AzureOpenAIEmbeddings(
+            azure_deployment=os.getenv("AZURE_EMBEDDING_DEPLOYMENT_NAME"),
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+            # LangChain will call this function to get a token
+            azure_ad_token_provider=token_manager.get_token,
+        )
 
     else:
-        raise ValueError(f"Unsupported embedding provider: '{provider}'. Please use 'google', 'azure', or 'openai'.")
+        raise ValueError(f"Unsupported embedding provider: '{provider}'. Please use 'google' or 'azure'.")

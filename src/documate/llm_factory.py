@@ -2,37 +2,40 @@
 
 import os
 from typing import Any
+from .azure_auth import AzureADTokenManager
 
 def get_chat_model() -> Any:
     """
     Factory function to get the appropriate chat model based on environment variables.
-    
-    Returns:
-        An instance of a chat model (e.g., ChatGoogleGenerativeAI) configured for streaming.
-    
-    Raises:
-        ValueError: If the provider is not supported or required keys are missing.
     """
     provider = os.getenv("CHAT_PROVIDER", "google").lower()
     print(f"Chat provider selected: {provider}")
 
     if provider == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        
         google_api_key = os.getenv("GOOGLE_API_KEY")
         if not google_api_key:
             raise ValueError("GOOGLE_API_KEY is not set in the environment.")
-        
-        # Gemini Pro is a good general-purpose model
         return ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash-lite", 
-            google_api_key=google_api_key,
-            temperature=0.1,
-            convert_system_message_to_human=True # Helps with some prompt formats
+            model="gemini-pro", google_api_key=google_api_key,
+            temperature=0.1, convert_system_message_to_human=True
         )
 
     elif provider == "azure":
-        raise NotImplementedError("Azure chat provider is not yet implemented.")
+        # --- NEW SECTION FOR AZURE ---
+        from langchain_openai import AzureChatOpenAI
+
+        # Create a single token manager instance
+        token_manager = AzureADTokenManager()
+
+        return AzureChatOpenAI(
+            azure_deployment=os.getenv("AZURE_CHAT_DEPLOYMENT_NAME"),
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+            # LangChain will call this function to get a token
+            azure_ad_token_provider=token_manager.get_token,
+            temperature=0.1
+        )
 
     else:
         raise ValueError(f"Unsupported chat provider: '{provider}'.")
