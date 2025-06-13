@@ -5,7 +5,7 @@ I want to build a project called Documate. At a high level,
 * Provides architecture diagrams, documentation, links to sources, summaries and more for all your repos. 
 * Ask Documate - will use information in the wiki provided by documate to better understand and find the relevant context in your codebase.
 
-### Detailed Functional Requirements for Documate - A DeepWiki-like System
+### Detailed Functional Requirements for Documate - A CodeWiki-like System
 
 **1. Repository Ingestion and Management:**
 *   **Repository Source Support:** The system must be able to accept and process code repositories from Bitbucket and Github.

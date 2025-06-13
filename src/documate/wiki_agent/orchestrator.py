@@ -141,6 +141,6 @@ class WikiOrchestrator:
             
         initial_state = {"repo_name": repo_name, "repo_path": repo_path}
         
-        print(f"\n🚀 Starting DeepWiki Generation for: {repo_name} 🚀\n")
+        print(f"\n🚀 Starting CodeWiki Generation for: {repo_name} 🚀\n")
         self.workflow.invoke(initial_state, {"recursion_limit": 10})
-        print(f"\n✅ DeepWiki Scaffolding Complete for: {repo_name} ✅\n")
+        print(f"\n✅ CodeWiki Scaffolding Complete for: {repo_name} ✅\n")

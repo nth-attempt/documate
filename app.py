@@ -1,8 +1,8 @@
 # app.py
 
 import os
-import json
 import streamlit as st
+import json
 from dotenv import load_dotenv
 from io import BytesIO
 
@@ -13,11 +13,11 @@ from src.documate.embeddings_factory import get_embedding_model
 from src.documate.llm_factory import get_chat_model
 from src.documate.qa_agent import QAAgent
 from src.documate.callbacks.streamlit_callback import StreamlitCallbackHandler
-from src.documate.doc_agent.agent import DocumentationAgent
 from src.documate.wiki_agent.orchestrator import WikiOrchestrator
 
-# --- Page Configuration and Service Initialization ---
-st.set_page_config(page_title="Documate", page_icon="🤖", layout="wide")
+# --- 1. PAGE CONFIGURATION & SERVICE INITIALIZATION ---
+
+st.set_page_config(page_title="CodeWiki", page_icon="🧠", layout="wide")
 load_dotenv()
 
 @st.cache_resource
@@ -31,267 +31,213 @@ def get_services():
         services["embeddings"] = get_embedding_model()
         services["chat_model"] = get_chat_model()
     except Exception as e:
-        st.error(f"Failed to initialize AI models: {e}. Check your .env file and API keys.")
+        st.error(f"Failed to initialize AI models: {e}. Check .env.")
         st.stop()
 
     services["repo_manager"] = RepoManager(base_clone_path=clone_path)
     services["analytics_agent"] = AnalyticsAgent(
-        config_path="configs/file_filters.json",
-        vector_store=ChromaStore(),
-        embeddings=services["embeddings"],
-        vector_db_path=vector_db_path
+        config_path="configs/file_filters.json", vector_store=ChromaStore(),
+        embeddings=services["embeddings"], vector_db_path=vector_db_path
     )
     services["qa_agent"] = QAAgent(
-        chat_model=services["chat_model"],
-        embeddings=services["embeddings"],
+        chat_model=services["chat_model"], embeddings=services["embeddings"],
         vector_db_path=vector_db_path
     )
-    services["doc_agent"] = DocumentationAgent(
-        llm=services["chat_model"],
-        qa_agent=services["qa_agent"]
-    )
     services["wiki_orchestrator"] = WikiOrchestrator(
-        llm=services["chat_model"], 
-        qa_agent=services["qa_agent"]
+        llm=services["chat_model"], qa_agent=services["qa_agent"]
     )
     return services
 
+# Load all services once
 services = get_services()
 manager = services["repo_manager"]
-analytics_agent = services["analytics_agent"]
-qa_agent = services["qa_agent"]
-doc_agent = services["doc_agent"]
 wiki_orchestrator = services["wiki_orchestrator"]
+qa_agent = services["qa_agent"]
 
-# --- UI Layout ---
-st.title("🤖 Documate: Your AI Codebase Companion")
+# Initialize session state variables if they don't exist
+if "view_mode" not in st.session_state:
+    st.session_state.view_mode = "gallery"
+if "selected_repo" not in st.session_state:
+    st.session_state.selected_repo = None
 
-# --- Ingestion and Analysis Section (Collapsible) ---
-with st.expander("Step 1: Ingest & Analyze a Repository", expanded=False):
+# --- 2. UI VIEW DEFINITIONS (Helper Functions) ---
+
+def render_add_new_repo_view():
+    st.header("➕ Add a New Repository")
+    st.info("Provide a repository to be analyzed and documented. The full analysis and CodeWiki generation will be performed.")
+
     tab1, tab2 = st.tabs(["Clone from URL", "Upload ZIP File"])
 
-    def handle_ingestion_success(local_path):
-        repo_name = os.path.basename(local_path)
-        with st.spinner(f"Analyzing {repo_name}... This may take a while."):
-            success = analytics_agent.process_repository(local_path)
-        if success:
-            st.success(f"Analysis complete for **{repo_name}**! You can now interact with it below.")
-            st.session_state.selected_repo = repo_name  # Auto-select the new repo
-            # Clear any previously generated docs for the new repo
-            if "generated_readme" in st.session_state:
-                del st.session_state.generated_readme
-        else:
-            st.error("Analysis failed. Please check the terminal for more details.")
-    
+    def handle_ingestion_and_generation(repo_path):
+        with st.spinner("🤖 The CodeWiki agent is at work... This will take several minutes."):
+            try:
+                wiki_orchestrator.generate(os.path.basename(repo_path))
+                st.success("Repository processed and CodeWiki generated successfully!")
+                st.session_state.view_mode = "gallery"
+                st.session_state.selected_repo = None
+                st.rerun()
+            except Exception as e:
+                st.error(f"An error occurred during processing: {e}")
+
     with tab1:
-        repo_url = st.text_input("Repository URL", placeholder="https://github.com/your-org/your-repo.git", key="repo_url_input")
-        if st.button("Clone and Analyze"):
+        repo_url = st.text_input("Repository URL", placeholder="https://github.com/your-org/your-repo.git")
+        if st.button("Analyze & Generate CodeWiki from URL", use_container_width=True):
             if repo_url:
                 with st.spinner(f"Cloning {repo_url}..."):
                     local_path = manager.clone_repo(repo_url)
                 if local_path:
-                    handle_ingestion_success(local_path)
+                    handle_ingestion_and_generation(local_path)
                 else:
                     st.error("Failed to clone. Check URL and see terminal logs.")
     
     with tab2:
-        uploaded_file = st.file_uploader("Choose a ZIP file", type="zip", key="zip_uploader")
+        uploaded_file = st.file_uploader("Choose a ZIP file", type="zip")
         if uploaded_file:
-            if st.button("Upload and Analyze"):
+            if st.button("Analyze & Generate CodeWiki from ZIP", use_container_width=True):
                 with st.spinner("Processing ZIP file..."):
                     local_path = manager.process_zip_file(BytesIO(uploaded_file.getvalue()), uploaded_file.name)
                 if local_path:
-                    handle_ingestion_success(local_path)
+                    handle_ingestion_and_generation(local_path)
                 else:
                     st.error("Failed to process ZIP. See terminal logs.")
-
-st.divider()
-
-# --- Main Application Section ---
-st.header("Step 2: Interact with a Repository")
-
-vector_db_path = os.getenv("VECTOR_DB_PATH", "vector_stores")
-if os.path.exists(vector_db_path):
-    available_repos = [d for d in os.listdir(vector_db_path) if os.path.isdir(os.path.join(vector_db_path, d))]
-else:
-    available_repos = []
-
-if not available_repos:
-    st.warning("No repositories have been analyzed yet. Please use the section above to ingest a repository.")
-else:
-    # Initialize session state for selected repo if it doesn't exist or is no longer valid
-    if "selected_repo" not in st.session_state or st.session_state.selected_repo not in available_repos:
-        st.session_state.selected_repo = available_repos[0]
     
-    # Store the previous repo to detect changes
-    prev_repo = st.session_state.selected_repo
+    if st.button("⬅️ Back to Gallery"):
+        st.session_state.view_mode = "gallery"
+        st.rerun()
+
+
+def render_gallery_view():
+    st.header("Available Repositories")
     
-    selected_repo = st.selectbox(
-        "Choose a repository:",
-        options=available_repos,
-        index=available_repos.index(st.session_state.selected_repo)
-    )
-    st.session_state.selected_repo = selected_repo
+    clone_path = os.getenv("CLONE_PATH", "cloned_repos")
+    if os.path.exists(clone_path):
+        available_repos = [d for d in os.listdir(clone_path) if os.path.isdir(os.path.join(clone_path, d))]
+    else:
+        available_repos = []
+    
+    cols = st.columns(4)
+    with cols[0]:
+        with st.container(border=True):
+            st.markdown("### ➕ Add New Repo")
+            if st.button("Import & Analyze", key="add_new", use_container_width=True):
+                st.session_state.view_mode = "add_new"
+                st.session_state.selected_repo = None
+                st.rerun()
 
-    # If the repository has changed, clear the chat and generated docs
-    if prev_repo != selected_repo:
-        st.session_state.messages = []
-        if "generated_readme" in st.session_state:
-            del st.session_state.generated_readme
+    for i, repo_name in enumerate(available_repos):
+        col_index = (i + 1) % 4
+        with cols[col_index]:
+            with st.container(border=True):
+                st.markdown(f"#### {repo_name}")
+                if st.button("Select", key=repo_name, use_container_width=True):
+                    st.session_state.selected_repo = repo_name
+                    st.rerun()
 
-    # --- Create tabs for different interactions ---
-    chat_tab, docs_tab, wiki_tab = st.tabs([
-        "💬 Ask Documate (Chat)", 
-        "📝 Generate Single README", 
-        "📚 Generate DeepWiki"
-    ])
+
+def render_selected_repo_view(repo_name):
+    st.header(f"Inspecting: `{repo_name}`")
+    if st.button("⬅️ Back to All Repositories"):
+        st.session_state.selected_repo = None
+        st.rerun()
+
+    chat_tab, wiki_tab = st.tabs(["💬 Ask this Repo", "📚 View CodeWiki"])
 
     with chat_tab:
-        st.subheader(f"Chat with `{selected_repo}`")
-        # Initialize chat history for the current repo
-        if "messages" not in st.session_state or st.session_state.get("current_repo_chat") != selected_repo:
+        st.subheader(f"Chat with `{repo_name}`")
+        if "messages" not in st.session_state or st.session_state.get("current_chat_repo") != repo_name:
             st.session_state.messages = []
-            st.session_state.current_repo_chat = selected_repo
+            st.session_state.current_chat_repo = repo_name
 
-        # Display chat messages from history
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-        # Accept user input
-        if prompt := st.chat_input(f"Ask a question about {selected_repo}..."):
+        if prompt := st.chat_input(f"Ask a question about {repo_name}..."):
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.markdown(prompt)
-
             with st.chat_message("assistant"):
                 container = st.empty()
                 st_callback = StreamlitCallbackHandler(container)
-                try:
-                    response = qa_agent.get_answer(
-                        question=prompt,
-                        repo_name=selected_repo,
-                        callbacks=[st_callback]
-                    )
-                    final_answer = response.get("result", "Sorry, I couldn't find an answer.")
-                    container.markdown(final_answer)
-                    st.session_state.messages.append({"role": "assistant", "content": final_answer})
-                except Exception as e:
-                    st.error(f"An error occurred: {e}")
+                response = qa_agent.get_answer(prompt, repo_name, [st_callback])
+                final_answer = response.get("result", "Sorry, I couldn't find an answer.")
+                container.markdown(final_answer)
+                st.session_state.messages.append({"role": "assistant", "content": final_answer})
 
-    with docs_tab:
-        st.subheader(f"Generate Full Documentation for `{selected_repo}`")
-        st.markdown("Click the button below to start an AI agent that will research the codebase and generate a complete `README.md` file, including an architecture diagram.")
-        
-        if st.button("🚀 Generate README.md", key="generate_docs"):
-            with st.spinner("🤖 The documentation agent is at work... This can take a few minutes. Check the terminal for progress."):
-                try:
-                    generated_readme = doc_agent.generate(selected_repo)
-                    st.session_state.generated_readme = generated_readme
-                except Exception as e:
-                    st.error(f"An error occurred during documentation generation: {e}")
-                    st.session_state.generated_readme = None
-
-        if "generated_readme" in st.session_state and st.session_state.generated_readme:
-            st.divider()
-            st.subheader("Generated Document")
-            
-            st.markdown(st.session_state.generated_readme)
-            
-            st.download_button(
-                label="Download README.md",
-                data=st.session_state.generated_readme,
-                file_name=f"{selected_repo}_README.md",
-                mime="text/markdown",
-            )
-        st.subheader(f"Generate Full Documentation for `{selected_repo}` (Single File)")
-    
     with wiki_tab:
-        st.subheader(f"Generate & View a Multi-Page DeepWiki for `{selected_repo}`")
-
-        wiki_output_path = os.path.join("wikis", selected_repo)
+        st.subheader(f"CodeWiki for `{repo_name}`")
+        wiki_output_path = os.path.join("wikis", repo_name)
         plan_path = os.path.join(wiki_output_path, "structure.json")
-
-        # --- Generation Section ---
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            if st.button("🚀 Generate or Re-generate DeepWiki", key="generate_wiki", use_container_width=True):
-                # When we start a new generation, set the completion flag to False
-                st.session_state.wiki_generation_complete = False
-                with st.spinner("🤖 The full DeepWiki agent is at work... This will take several minutes."):
-                    try:
-                        # This runs the full plan -> save -> generate pages workflow
-                        wiki_orchestrator.generate(selected_repo)
-                        st.success("DeepWiki generation complete!")
-                        # --- CRITICAL FIX: Set a flag upon successful completion ---
-                        st.session_state.wiki_generation_complete = True
-                        # Clear query params to show the intro page after generation
-                        st.query_params.clear()
-                        # Rerun to ensure the display section updates correctly
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"An error occurred during wiki generation: {e}")
-                        st.session_state.wiki_generation_complete = False
-
-        with col2:
-            st.info("This process invokes multiple AI agents to plan the wiki structure, write content for each page, and generate diagrams. Check your terminal for detailed progress.")
-
-        st.divider()
-
-        # --- Display Section ---
-        # --- CRITICAL FIX: Check for BOTH the plan and the completion flag ---
-        # We also check the session state flag to ensure generation isn't in progress.
-        if "wiki_generation_complete" not in st.session_state:
-            st.session_state.wiki_generation_complete = os.path.exists(plan_path)
-
-        if not st.session_state.wiki_generation_complete:
-            st.info("No wiki has been generated for this repository yet, or generation is in progress. Click the button above to start.")
+        if not os.path.exists(plan_path):
+            st.warning("No CodeWiki has been generated for this repository yet.")
         else:
-            # If the flag is true, we can safely assume the files exist.
-            try:
-                with open(plan_path, 'r') as f:
-                    wiki_structure = json.load(f)
+            display_wiki(wiki_output_path, plan_path, repo_name)
 
-                query_params = st.query_params
-                current_page_file = query_params.get("page", [None])[0]
 
-                default_page_file = wiki_structure["pages"][0]["file"] if wiki_structure["pages"] else None
-                if current_page_file is None:
-                    current_page_file = default_page_file
+def display_wiki(wiki_output_path, plan_path, repo_name):
+    with open(plan_path, 'r') as f:
+        wiki_structure = json.load(f)
 
-                nav_col, content_col = st.columns([1, 3])
+    session_key = f"wiki_page_{repo_name}"
+    if session_key not in st.session_state or st.session_state.get("current_repo_wiki") != repo_name:
+        st.session_state.current_repo_wiki = repo_name
+        if wiki_structure.get("pages"):
+            st.session_state[session_key] = wiki_structure["pages"][0]["file"]
+        else:
+            st.session_state[session_key] = None
 
-                with nav_col:
-                    st.header(wiki_structure.get("title", "Wiki Navigation"))
-                    
-                    def render_nav(pages, level=0):
-                        for page in pages:
-                            # Indent sub-pages
-                            prefix = " " * (level * 4) + "- "
-                            if st.button(page['title'], key=page['file'], use_container_width=True):
-                                st.query_params["page"] = page['file']
-                                st.rerun()
-                            if page.get("pages"):
-                                render_nav(page["pages"], level + 1)
-                    
-                    render_nav(wiki_structure["pages"])
+    nav_col, content_col = st.columns([1, 3], gap="large")
+    with nav_col:
+        st.header(wiki_structure.get("title", "Wiki Navigation"))
+        def render_nav_tree(pages):
+            for page in pages:
+                if page.get("pages"):
+                    child_files = [p['file'] for p in page.get("pages", [])]
+                    is_expanded = st.session_state.get(session_key) in child_files
+                    with st.expander(page['title'], expanded=is_expanded):
+                        render_nav_tree(page["pages"])
+                else:
+                    if st.button(page['title'], key=f"nav_{page['file']}", use_container_width=True):
+                        st.session_state[session_key] = page['file']
+                        st.rerun()
+        render_nav_tree(wiki_structure["pages"])
 
-                with content_col:
-                    content_file_path = os.path.join(wiki_output_path, current_page_file) if current_page_file else None
-                    if content_file_path and os.path.exists(content_file_path):
-                        with open(content_file_path, 'r', encoding='utf-8') as f:
-                            page_content = f.read()
-                        st.markdown(page_content, unsafe_allow_html=True)
-                    elif default_page_file and os.path.exists(os.path.join(wiki_output_path, default_page_file)):
-                        # Fallback to default if current page is somehow invalid
-                        with open(os.path.join(wiki_output_path, default_page_file), 'r', encoding='utf-8') as f:
-                            page_content = f.read()
-                        st.markdown(page_content, unsafe_allow_html=True)
-                    else:
-                        st.warning("Select a page from the navigation to view its content, or the content file may be missing.")
+    with content_col:
+        page_file_to_display = st.session_state.get(session_key)
+        if page_file_to_display:
+            content_file_path = os.path.join(wiki_output_path, page_file_to_display)
+            if os.path.exists(content_file_path):
+                with open(content_file_path, 'r', encoding='utf-8') as f:
+                    page_content = f.read()
+                st.markdown(page_content, unsafe_allow_html=True)
+            else:
+                st.error(f"Content file not found: `{page_file_to_display}`.")
 
-            except FileNotFoundError:
-                st.error("Wiki structure file found, but content files are missing. Please try re-generating the wiki.")
-                st.session_state.wiki_generation_complete = False
-            except Exception as e:
-                st.error(f"An error occurred while displaying the wiki: {e}")
+# --- 3. MAIN ROUTER ---
+
+# --- HEADER WITH LOGO ---
+# Use columns to center the image and control its size.
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    # Make sure the path to your logo is correct
+    if os.path.exists("assets/logo.png"):
+        st.image("assets/logo.png", use_column_width=True)
+    else:
+        st.title("CodeWiki Knowledge Hub") # Fallback to text title if logo not found
+
+st.divider()
+
+# --- Global Search Bar Placeholder ---
+query = st.text_input("Search across all repositories...", placeholder="e.g., 'How do I implement a progress bar?'")
+if query:
+    st.info("Multi-repo search is a planned feature. For now, please select a repository below to ask questions.")
+
+# --- Main Content Router ---
+if st.session_state.view_mode == "add_new":
+    render_add_new_repo_view()
+elif st.session_state.selected_repo is not None:
+    render_gallery_view()
+    st.divider()
+    render_selected_repo_view(st.session_state.selected_repo)
+else:
+    render_gallery_view()
