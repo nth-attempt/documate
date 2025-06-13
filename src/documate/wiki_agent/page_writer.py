@@ -23,7 +23,9 @@ class PageWriter:
             diagram_code = self.llm.invoke(prompt).content.strip()
 
             if "IGNORE" not in diagram_code and "graph" in diagram_code:
-                return f"\n### Diagram\n\n```mermaid\n{diagram_code}\n```\n"
+                # Return just the raw Mermaid code
+                return diagram_code
+        # Return an empty string if no diagram is generated
         return ""
 
     def write_page(self, repo_name: str, page_title: str, parent_title: str) -> str:
@@ -71,9 +73,21 @@ class PageWriter:
         """
         final_content = self.llm.invoke(synthesis_prompt).content
 
-        # 5. (Optional) Add a diagram
-        diagram_md = self._generate_diagram_if_needed(page_title, final_content)
-        final_content += diagram_md
+        # 5. Generate a diagram if needed and insert a placeholder
+        # The _generate_diagram_if_needed method now returns the raw code, not markdown
+        diagram_code = self._generate_diagram_if_needed(page_title, final_content)
+        
+        if diagram_code:
+            # We use a unique placeholder that's unlikely to appear naturally
+            placeholder = f"\n\n%%MERMAID_DIAGRAM%%{diagram_code}%%MERMAID_DIAGRAM%%\n\n"
+            # We try to insert it in a logical place, e.g., after the first major section
+            first_heading_match = re.search(r'\n## .*\n', final_content)
+            if first_heading_match:
+                insert_pos = first_heading_match.end()
+                final_content = final_content[:insert_pos] + placeholder + final_content[insert_pos:]
+            else:
+                # Fallback to appending at the end
+                final_content += placeholder
         
         print(f"--- PageWriter: Finished page for '{page_title}' ---")
         return final_content

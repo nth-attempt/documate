@@ -1,103 +1,87 @@
-# src/documate/qa_agent.py
-
 import os
 from typing import Any, List, Dict
-from operator import itemgetter
-
-from langchain.callbacks.base import BaseCallbackHandler
+from langchain.retrievers import MergerRetriever
 from langchain.prompts import PromptTemplate
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
 class QAAgent:
     """
-    An agent that answers questions about a repository using a RAG pipeline.
-    This version uses LCEL for more control and includes source file citations.
+    An agent that answers questions using a hybrid RAG pipeline,
+    searching over both source code and generated wiki documentation.
     """
     def __init__(self, chat_model: Any, embeddings: Any, vector_db_path: str):
         self.chat_model = chat_model
         self.embeddings = embeddings
         self.vector_db_path = vector_db_path
-        print("QAAgent (LCEL-powered) initialized.")
+        print("QAAgent (Hybrid RAG) initialized.")
 
-    def _get_retriever(self, repo_name: str):
-        persist_directory = os.path.join(self.vector_db_path, repo_name)
-        if not os.path.exists(persist_directory):
-            raise FileNotFoundError(f"Vector store for repository '{repo_name}' not found.")
+    def _get_retrievers(self, repo_name: str) -> MergerRetriever:
+        """Creates and merges retrievers for code and wiki vector stores."""
+        code_index_path = os.path.join(self.vector_db_path, repo_name, "code")
+        wiki_index_path = os.path.join(self.vector_db_path, repo_name, "wiki")
+
+        retrievers = []
+        if os.path.exists(code_index_path):
+            code_store = Chroma(persist_directory=code_index_path, embedding_function=self.embeddings)
+            retrievers.append(code_store.as_retriever(search_kwargs={"k": 5}))
+            print("Code retriever loaded.")
         
-        vector_store = Chroma(
-            persist_directory=persist_directory,
-            embedding_function=self.embeddings
-        )
-        # Retrieve more documents to give the LLM better context for citation.
-        return vector_store.as_retriever(search_kwargs={"k": 8})
+        if os.path.exists(wiki_index_path):
+            wiki_store = Chroma(persist_directory=wiki_index_path, embedding_function=self.embeddings)
+            retrievers.append(wiki_store.as_retriever(search_kwargs={"k": 3}))
+            print("Wiki retriever loaded.")
+
+        if not retrievers:
+            raise FileNotFoundError(f"No vector stores found for repository '{repo_name}'.")
+
+        # The merger retriever runs all retrievers and combines the results.
+        return MergerRetriever(retrievers=retrievers)
 
     def _format_docs_with_sources(self, docs: List[Document]) -> str:
-        """
-        Formats documents into a single string with clear source file markers.
-        """
+        """Formats docs with clear source markers (code vs. wiki)."""
         formatted_docs = []
-        for i, doc in enumerate(docs):
-            # Extract the relative path from the full path in metadata
+        for doc in docs:
             source_path = doc.metadata.get("source", "Unknown Source")
-            # We can try to make the path relative to the repo root if possible
-            # This is a heuristic and might need adjustment based on repo structure
-            try:
-                # Assuming the path is like .../cloned_repos/repo_name/src/file.py
-                parts = source_path.split(os.sep)
-                repo_name_index = parts.index(os.path.basename(doc.metadata.get("repo_path", "")))
-                relative_path = os.path.join(*parts[repo_name_index + 1:])
-            except (ValueError, KeyError, TypeError):
-                relative_path = source_path
-
+            # Determine if it's a code or wiki source
+            source_type = "Wiki Page" if ".md" in source_path else "Source Code"
+            
+            # Use just the filename for cleaner citations
+            filename = os.path.basename(source_path)
             content = doc.page_content
-            formatted_docs.append(f"--- START OF {relative_path} ---\n{content}\n--- END OF {relative_path} ---")
+            formatted_docs.append(f"--- START OF CONTEXT FROM: [{source_type}: {filename}] ---\n{content}\n--- END OF CONTEXT ---")
         
         return "\n\n".join(formatted_docs)
 
-    def get_answer(self, question: str, repo_name: str, callbacks: List[BaseCallbackHandler] | None = None) -> Dict[str, Any]:
-        print(f"Querying repository '{repo_name}' with question: '{question}'")
+    def get_answer(self, question: str, repo_name: str, callbacks: List[Any] | None = None) -> Dict[str, Any]:
+        retriever = self._get_retrievers(repo_name)
         
-        retriever = self._get_retriever(repo_name)
-        repo_path = os.path.join("cloned_repos", repo_name) # Heuristic for getting repo path
-
-        # This is our new, more explicit prompt template
         prompt_template = """
         You are an expert AI assistant for the codebase: **{repo_name}**.
-        Your goal is to provide helpful, accurate, and detailed answers to a developer's questions.
-
-        Use the following context, which consists of code snippets from different files, to answer the user's question.
+        Your goal is to provide helpful, accurate answers by synthesizing information from TWO sources: the raw source code and the human-written CodeWiki documentation.
 
         **CRITICAL INSTRUCTIONS:**
-        1.  When you provide code snippets or refer to specific logic, you **MUST CITE** the source file path. The file path is provided in the context markers (e.g., `--- START OF src/main.py ---`).
-        2.  Cite files directly in your answer, for example: "As seen in `src/utils/helpers.py`, the `format_data` function...".
-        3.  If the user asks for a high-level overview, synthesize information from multiple files and cite them all.
-        4.  If you don't know the answer or the context is insufficient, clearly state that you couldn't find the information in the provided files. DO NOT make up answers.
+        1.  Analyze the following context, which contains chunks from both source code and wiki pages.
+        2.  You **MUST CITE** the source of your information using the markers provided in the context, for example: `[Source Code: main.py]` or `[Wiki Page: 01_Introduction.md]`.
+        3.  Prioritize information from the CodeWiki for high-level explanations and overviews.
+        4.  Use information from the Source Code for specific implementation details, code snippets, and function definitions.
+        5.  Combine information from both sources for the most comprehensive answer. If they conflict, mention it.
+        6.  If you don't know the answer, state that clearly. DO NOT make up answers.
 
-        **CONTEXT FROM THE CODEBASE:**
+        **CONTEXT FROM REPOSITORY:**
         {context}
 
-        **QUESTION:**
-        {question}
+        **QUESTION:** {question}
 
         **DETAILED AND CITED ANSWER:**
         """
-        prompt = PromptTemplate(
-            template=prompt_template, input_variables=["context", "question", "repo_name"]
-        )
-
-        # We inject the repo_path into each document's metadata before formatting
-        def add_repo_path_to_docs(docs: List[Document]) -> List[Document]:
-            for doc in docs:
-                doc.metadata["repo_path"] = repo_path
-            return docs
-
-        # This is the LCEL (LangChain Expression Language) chain
+        prompt = PromptTemplate.from_template(prompt_template)
+        
         rag_chain = (
             {
-                "context": retriever | RunnableLambda(add_repo_path_to_docs) | RunnableLambda(self._format_docs_with_sources),
+                "context": retriever | self._format_docs_with_sources,
                 "question": RunnablePassthrough(),
                 "repo_name": lambda x: repo_name
             }
@@ -106,9 +90,5 @@ class QAAgent:
             | StrOutputParser()
         )
 
-        # We pass the original question straight into the chain
         result = rag_chain.invoke(question, config={"callbacks": callbacks})
-        
-        # The LCEL chain just returns the final string, so we package it
-        # for compatibility with our existing UI.
         return {"result": result}

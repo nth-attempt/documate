@@ -14,6 +14,7 @@ from src.documate.llm_factory import get_chat_model
 from src.documate.qa_agent import QAAgent
 from src.documate.callbacks.streamlit_callback import StreamlitCallbackHandler
 from src.documate.wiki_agent.orchestrator import WikiOrchestrator
+from src.documate.global_qa_agent import GlobalQAAgent
 
 # --- 1. PAGE CONFIGURATION & SERVICE INITIALIZATION ---
 
@@ -36,15 +37,23 @@ def get_services():
 
     services["repo_manager"] = RepoManager(base_clone_path=clone_path)
     services["analytics_agent"] = AnalyticsAgent(
-        config_path="configs/file_filters.json", vector_store=ChromaStore(),
-        embeddings=services["embeddings"], vector_db_path=vector_db_path
+        config_path="configs/file_filters.json",
+        vector_store=ChromaStore(),
+        embeddings=services["embeddings"]
     )
     services["qa_agent"] = QAAgent(
         chat_model=services["chat_model"], embeddings=services["embeddings"],
         vector_db_path=vector_db_path
     )
     services["wiki_orchestrator"] = WikiOrchestrator(
-        llm=services["chat_model"], qa_agent=services["qa_agent"]
+        llm=services["chat_model"],
+        qa_agent=services["qa_agent"],
+        analytics_agent=services["analytics_agent"]
+    )
+    services["global_qa_agent"] = GlobalQAAgent(
+        chat_model=services["chat_model"],
+        embeddings=services["embeddings"],
+        vector_db_path=vector_db_path
     )
     return services
 
@@ -53,6 +62,8 @@ services = get_services()
 manager = services["repo_manager"]
 wiki_orchestrator = services["wiki_orchestrator"]
 qa_agent = services["qa_agent"]
+global_qa_agent = services["global_qa_agent"]
+
 
 # Initialize session state variables if they don't exist
 if "view_mode" not in st.session_state:
@@ -69,15 +80,17 @@ def render_add_new_repo_view():
     tab1, tab2 = st.tabs(["Clone from URL", "Upload ZIP File"])
 
     def handle_ingestion_and_generation(repo_path):
-        with st.spinner("🤖 The CodeWiki agent is at work... This will take several minutes."):
-            try:
-                wiki_orchestrator.generate(os.path.basename(repo_path))
-                st.success("Repository processed and CodeWiki generated successfully!")
-                st.session_state.view_mode = "gallery"
-                st.session_state.selected_repo = None
-                st.rerun()
-            except Exception as e:
-                st.error(f"An error occurred during processing: {e}")
+        repo_name = os.path.basename(repo_path)
+        with st.spinner("Step 1/2: Analyzing and indexing source code..."):
+            # Manually index the code first
+            code_index_path = os.path.join(os.getenv("VECTOR_DB_PATH", "vector_stores"), repo_name, "code")
+            services["analytics_agent"].index_codebase(repo_path, code_index_path)
+
+        with st.spinner("Step 2/2: Generating and indexing CodeWiki... This may take several minutes."):
+            # Now run the orchestrator which will generate and index the wiki
+            wiki_orchestrator.generate(repo_name)
+        
+        st.success("Repository processed and CodeWiki generated successfully!")
 
     with tab1:
         repo_url = st.text_input("Repository URL", placeholder="https://github.com/your-org/your-repo.git")
@@ -202,16 +215,33 @@ def display_wiki(wiki_output_path, plan_path, repo_name):
                         st.rerun()
         render_nav_tree(wiki_structure["pages"])
 
-    with content_col:
-        page_file_to_display = st.session_state.get(session_key)
-        if page_file_to_display:
-            content_file_path = os.path.join(wiki_output_path, page_file_to_display)
-            if os.path.exists(content_file_path):
-                with open(content_file_path, 'r', encoding='utf-8') as f:
-                    page_content = f.read()
-                st.markdown(page_content, unsafe_allow_html=True)
+        with content_col:
+            page_file_to_display = st.session_state.get(session_key)
+            
+            if page_file_to_display:
+                content_file_path = os.path.join(wiki_output_path, page_file_to_display)
+                if os.path.exists(content_file_path):
+                    with open(content_file_path, 'r', encoding='utf-8') as f:
+                        page_content = f.read()
+
+                    # --- NEW LOGIC TO RENDER MERMAID CHARTS ---
+                    from streamlit_mermaid import st_mermaid # Import here
+
+                    # Check for our placeholder
+                    if "%%MERMAID_DIAGRAM%%" in page_content:
+                        parts = page_content.split("%%MERMAID_DIAGRAM%%")
+                        # The structure will be [text_before, diagram_code, text_after]
+                        st.markdown(parts[0]) # Render text before the diagram
+                        st_mermaid(parts[1])  # Render the live diagram
+                        st.markdown(parts[2]) # Render text after the diagram
+                    else:
+                        # If no diagram, just render the whole markdown
+                        st.markdown(page_content, unsafe_allow_html=True)
+                else:
+                    st.error(f"Content file not found: `{page_file_to_display}`. It might have been moved or deleted.")
+                    st.info("You may need to re-generate the CodeWiki.")
             else:
-                st.error(f"Content file not found: `{page_file_to_display}`.")
+                st.info("Select a page from the navigation tree to view its content.")
 
 # --- 3. MAIN ROUTER ---
 
@@ -223,21 +253,41 @@ with col2:
     if os.path.exists("assets/logo.png"):
         st.image("assets/logo.png", use_column_width=True)
     else:
-        st.title("CodeWiki Knowledge Hub") # Fallback to text title if logo not found
+        st.title("Documate - Effortless Documentation & Insightful Code Analysis") # Fallback to text title if logo not found
 
 st.divider()
 
-# --- Global Search Bar Placeholder ---
-query = st.text_input("Search across all repositories...", placeholder="e.g., 'How do I implement a progress bar?'")
-if query:
-    st.info("Multi-repo search is a planned feature. For now, please select a repository below to ask questions.")
+if "global_messages" not in st.session_state:
+    st.session_state.global_messages = []
 
-# --- Main Content Router ---
-if st.session_state.view_mode == "add_new":
-    render_add_new_repo_view()
-elif st.session_state.selected_repo is not None:
-    render_gallery_view()
+# The input field for the global search
+prompt = st.chat_input("Search across all repositories...")
+if prompt:
+    st.session_state.global_messages.append({"role": "user", "content": prompt})
+    with st.spinner("🤖 Searching across all knowledge bases..."):
+        response = global_qa_agent.get_answer(prompt)
+        st.session_state.global_messages.append({"role": "assistant", "content": response["result"]})
+
+# --- Display Global Search Chat History ---
+if st.session_state.global_messages:
+    for message in st.session_state.global_messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    
+    # Add a button to clear the global search and return to the gallery
+    if st.button("Clear Search & View Repositories"):
+        st.session_state.global_messages = []
+        st.rerun()
     st.divider()
-    render_selected_repo_view(st.session_state.selected_repo)
-else:
-    render_gallery_view()
+
+# --- Main Content Router (Gallery or Selected Repo) ---
+# Only show the gallery/repo views if there is no active global search
+if not st.session_state.global_messages:
+    if st.session_state.view_mode == "add_new":
+        render_add_new_repo_view()
+    elif st.session_state.selected_repo is not None:
+        render_gallery_view()
+        st.divider()
+        render_selected_repo_view(st.session_state.selected_repo)
+    else:
+        render_gallery_view()

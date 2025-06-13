@@ -22,4 +22,6 @@ dependencies = [
     "chromadb>=0.6.3",
     "langchain-google-genai>=2.1.5",
     "langchain-community>=0.3.25",
+    "streamlit-mermaid>=0.3.0",
+    "azure-identity>=1.23.0",
 ]

@@ -9,6 +9,7 @@ from .architect import WikiArchitect
 from .prompts import FlatWikiStructure, Page, WikiStructure
 from .page_writer import PageWriter 
 from ..qa_agent import QAAgent 
+from ..analytics_agent import AnalyticsAgent
 
 # --- 1. Define the State for the Orchestrator ---
 
@@ -24,10 +25,11 @@ class WikiGenerationState(TypedDict):
 # --- 2. Define the Orchestrator's Nodes ---
 
 class OrchestratorNodes:
-    # --- CHANGE: __init__ now also takes a PageWriter ---
-    def __init__(self, architect: WikiArchitect, page_writer: PageWriter):
+    # --- CHANGE: __init__ now also takes an AnalyticsAgent ---
+    def __init__(self, architect, page_writer, analytics_agent: AnalyticsAgent):
         self.architect = architect
         self.page_writer = page_writer
+        self.analytics_agent = analytics_agent 
     
     def plan_wiki_structure(self, state: WikiGenerationState) -> WikiGenerationState:
         print("--- Orchestrator: Planning wiki structure ---")
@@ -105,32 +107,48 @@ class OrchestratorNodes:
             
         print(f"Plan saved to {plan_file_path}")
         return {"output_path": output_path}
+    
+    def index_generated_wiki(self, state: WikiGenerationState) -> WikiGenerationState:
+        """Node that triggers the AnalyticsAgent to index the new wiki files."""
+        print("\n--- Orchestrator: Indexing generated wiki content ---")
+        repo_name = state["repo_name"]
+        wiki_source_path = state["output_path"] # The 'wikis/repo_name' directory
+        wiki_index_path = os.path.join(os.getenv("VECTOR_DB_PATH", "vector_stores"), repo_name, "wiki")
+        
+        self.analytics_agent.index_wiki(
+            wiki_path=wiki_source_path,
+            index_path=wiki_index_path
+        )
+        return {}
 
 # --- 3. Define the Main Orchestrator Class ---
 
 class WikiOrchestrator:
-    # --- CHANGE: __init__ now needs the qa_agent to pass to the PageWriter ---
-    def __init__(self, llm: any, qa_agent: QAAgent):
+    # --- CHANGE: __init__ now needs both qa_agent and analytics_agent ---
+    def __init__(self, llm: any, qa_agent: QAAgent, analytics_agent: AnalyticsAgent):
         architect = WikiArchitect(llm)
-        page_writer = PageWriter(llm, qa_agent) # <-- Initialize PageWriter
-        self.nodes = OrchestratorNodes(architect, page_writer) # <-- Pass it to nodes
+        page_writer = PageWriter(llm, qa_agent)
+        # Pass the analytics_agent to the nodes class
+        self.nodes = OrchestratorNodes(architect, page_writer, analytics_agent)
         self.workflow = self._build_graph()
 
     def _build_graph(self):
         graph = StateGraph(WikiGenerationState)
-        
+        # ... (add_node calls for existing nodes) ...
         graph.add_node("plan_structure", self.nodes.plan_wiki_structure)
         graph.add_node("reconstruct_hierarchy", self.nodes.reconstruct_hierarchy)
         graph.add_node("save_plan", self.nodes.save_plan)
-        # --- ADD the new content generation node ---
         graph.add_node("generate_pages", self.nodes.generate_all_pages)
+        # --- ADD the new indexing node ---
+        graph.add_node("index_wiki", self.nodes.index_generated_wiki)
         
-        # --- CHANGE the graph's data flow to include the new step ---
+        # --- CHANGE the graph's data flow ---
         graph.set_entry_point("plan_structure")
         graph.add_edge("plan_structure", "reconstruct_hierarchy")
         graph.add_edge("reconstruct_hierarchy", "save_plan")
-        graph.add_edge("save_plan", "generate_pages") # <-- New Edge
-        graph.add_edge("generate_pages", END) # <-- New Edge
+        graph.add_edge("save_plan", "generate_pages")
+        graph.add_edge("generate_pages", "index_wiki") # <-- New Edge
+        graph.add_edge("index_wiki", END) # <-- New Edge
         
         return graph.compile()
 

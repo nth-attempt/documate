@@ -17,7 +17,7 @@ def get_chat_model() -> Any:
         if not google_api_key:
             raise ValueError("GOOGLE_API_KEY is not set in the environment.")
         return ChatGoogleGenerativeAI(
-            model="gemini-pro", google_api_key=google_api_key,
+            model="gemini-2.0-flash-lite", google_api_key=google_api_key,
             temperature=0.1, convert_system_message_to_human=True
         )
 
